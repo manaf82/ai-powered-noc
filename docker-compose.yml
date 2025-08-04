@@ -1,0 +1,436 @@
+version: '3.8'
+
+services:
+  # =====================================================
+  # DATABASE SERVICES
+  # =====================================================
+  
+  # PostgreSQL - Main application database
+  postgres:
+    image: postgres:15-alpine
+    container_name: ai-noc-postgres
+    environment:
+      POSTGRES_DB: noc_config
+      POSTGRES_USER: noc_user
+      POSTGRES_PASSWORD: noc_password
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./config/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./config/postgresql.conf:/etc/postgresql/postgresql.conf
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U noc_user -d noc_config"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - ai-noc-network
+
+  # Redis - Caching and session storage
+  redis:
+    image: redis:7-alpine
+    container_name: ai-noc-redis
+    command: redis-server --appendonly yes --requirepass redispassword
+    volumes:
+      - redis_data:/data
+      - ./config/redis.conf:/usr/local/etc/redis/redis.conf
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - ai-noc-network
+
+  # InfluxDB - Time series database for metrics
+  influxdb:
+    image: influxdb:2.7-alpine
+    container_name: ai-noc-influxdb
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: admin
+      DOCKER_INFLUXDB_INIT_PASSWORD: adminpassword
+      DOCKER_INFLUXDB_INIT_ORG: ai-noc
+      DOCKER_INFLUXDB_INIT_BUCKET: network-metrics
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: admin-token-12345
+    volumes:
+      - influxdb_data:/var/lib/influxdb2
+      - influxdb_config:/etc/influxdb2
+    ports:
+      - "8086:8086"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8086/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    networks:
+      - ai-noc-network
+
+  # =====================================================
+  # MESSAGE QUEUE & STREAMING
+  # =====================================================
+  
+  # Apache Kafka - Event streaming platform
+  kafka:
+    image: confluentinc/cp-kafka:latest
+    container_name: ai-noc-kafka
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: true
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    ports:
+      - "9092:9092"
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    networks:
+      - ai-noc-network
+
+  # Zookeeper - Kafka coordination service
+  zookeeper:
+    image: confluentinc/cp-zookeeper:latest
+    container_name: ai-noc-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper/data
+      - zookeeper_logs:/var/lib/zookeeper/log
+    ports:
+      - "2181:2181"
+    healthcheck:
+      test: ["CMD", "echo", "ruok", "|", "nc", "localhost", "2181"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - ai-noc-network
+
+  # =====================================================
+  # AI-NOC APPLICATION SERVICES
+  # =====================================================
+
+  # Data Collector Service - Collects SNMP/NetFlow/Syslog data
+  data-collector:
+    build:
+      context: .
+      dockerfile: Dockerfiles/Dockerfile.data-collector
+    container_name: ai-noc-data-collector
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      influxdb:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgresql://noc_user:noc_password@postgres:5432/noc_config
+      - REDIS_URL=redis://redis:6379
+      - INFLUXDB_URL=http://influxdb:8086
+      - INFLUXDB_TOKEN=admin-token-12345
+      - INFLUXDB_ORG=ai-noc
+      - INFLUXDB_BUCKET=network-metrics
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - LOG_LEVEL=INFO
+      - SNMP_COMMUNITY=public
+      - NETFLOW_PORT=2055
+      - SYSLOG_PORT=514
+    ports:
+      - "8080:8080"
+      - "2055:2055/udp"  # NetFlow
+      - "514:514/udp"    # Syslog
+    volumes:
+      - ./logs:/app/logs
+      - ./config/devices.yaml:/app/config/devices.yaml
+      - ./src/data-collector:/app/src:ro  # Read-only for development
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 45s
+    restart: unless-stopped
+    networks:
+      - ai-noc-network
+
+  # AI Engine Service - Machine learning and AI processing
+  ai-engine:
+    build:
+      context: .
+      dockerfile: Dockerfiles/Dockerfile.ai-engine
+    container_name: ai-noc-ai-engine
+    depends_on:
+      data-collector:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgresql://noc_user:noc_password@postgres:5432/noc_config
+      - REDIS_URL=redis://redis:6379
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - MODEL_PATH=/app/models
+      - TRAINING_DATA_PATH=/app/data
+      - LOG_LEVEL=INFO
+      - TENSORFLOW_CPP_MIN_LOG_LEVEL=2
+      - CUDA_VISIBLE_DEVICES=""  # CPU-only for development
+    ports:
+      - "8081:8081"
+    volumes:
+      - ./src/ai-engine/models:/app/models
+      - ./logs:/app/logs
+      - ./data/training:/app/data
+      - ./src/ai-engine:/app/src:ro  # Read-only for development
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 2G
+    networks:
+      - ai-noc-network
+
+  # Dashboard Backend - FastAPI REST API
+  dashboard-backend:
+    build:
+      context: .
+      dockerfile: Dockerfiles/Dockerfile.dashboard-backend
+    container_name: ai-noc-dashboard-backend
+    depends_on:
+      ai-engine:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgresql://noc_user:noc_password@postgres:5432/noc_config
+      - REDIS_URL=redis://redis:6379
+      - AI_ENGINE_URL=http://ai-engine:8081
+      - DATA_COLLECTOR_URL=http://data-collector:8080
+      - CORS_ORIGINS=http://localhost:3000,http://localhost:80
+      - LOG_LEVEL=INFO
+      - RELOAD=true  # Hot reload for development
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./logs:/app/logs
+      - ./src/dashboard/backend:/app:ro  # Read-only for development
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - ai-noc-network
+
+  # Dashboard Frontend - React.js application
+  dashboard-frontend:
+    build:
+      context: .
+      dockerfile: Dockerfiles/Dockerfile.dashboard-frontend
+      target: development  # Use development stage for hot reload
+    container_name: ai-noc-dashboard-frontend
+    depends_on:
+      - dashboard-backend
+    environment:
+      - REACT_APP_API_URL=http://localhost:8000
+      - REACT_APP_WS_URL=ws://localhost:8000
+      - CHOKIDAR_USEPOLLING=true  # Enable hot reload in Docker
+      - GENERATE_SOURCEMAP=false
+    ports:
+      - "3000:3000"  # React dev server
+    volumes:
+      - ./src/dashboard/frontend:/app
+      - /app/node_modules  # Anonymous volume for node_modules
+    stdin_open: true
+    tty: true
+    restart: unless-stopped
+    networks:
+      - ai-noc-network
+
+  # =====================================================
+  # MONITORING & OBSERVABILITY
+  # =====================================================
+
+  # Prometheus - Metrics collection
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: ai-noc-prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - ai-noc-network
+
+  # Grafana - Metrics visualization
+  grafana:
+    image: grafana/grafana:latest
+    container_name: ai-noc-grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./config/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./config/grafana/datasources:/etc/grafana/provisioning/datasources
+      - ./config/grafana/dashboard-configs:/var/lib/grafana/dashboards
+    ports:
+      - "3001:3000"  # Grafana on port 3001 to avoid conflict
+    depends_on:
+      - prometheus
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - ai-noc-network
+
+  # Elasticsearch - Log aggregation
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.10.0
+    container_name: ai-noc-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    ports:
+      - "9200:9200"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+    networks:
+      - ai-noc-network
+
+  # Kibana - Log visualization
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.10.0
+    container_name: ai-noc-kibana
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    volumes:
+      - kibana_data:/usr/share/kibana/data
+    ports:
+      - "5601:5601"
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5601/api/status || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+    networks:
+      - ai-noc-network
+
+  # =====================================================
+  # NETWORK SIMULATION (for testing)
+  # =====================================================
+
+  # SNMP Simulator - Simulates network devices
+  snmp-simulator:
+    image: tandrup/snmpsim
+    container_name: ai-noc-snmp-simulator
+    command: |
+      sh -c "
+        snmpsim-command-responder 
+        --data-dir=/usr/local/snmpsim/data 
+        --cache-dir=/tmp/snmpsim-cache 
+        --logging-method=file:/tmp/snmpsim.log 
+        --agent-udpv4-endpoint=0.0.0.0:161
+      "
+    volumes:
+      - ./config/snmp-data:/usr/local/snmpsim/data
+    ports:
+      - "161:161/udp"
+    restart: unless-stopped
+    networks:
+      - ai-noc-network
+
+# =====================================================
+# VOLUMES - Data persistence
+# =====================================================
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  influxdb_data:
+    driver: local
+  influxdb_config:
+    driver: local
+  kafka_data:
+    driver: local
+  zookeeper_data:
+    driver: local
+  zookeeper_logs:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+  elasticsearch_data:
+    driver: local
+  kibana_data:
+    driver: local
+
+# =====================================================
+# NETWORKS - Container networking
+# =====================================================
+networks:
+  ai-noc-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

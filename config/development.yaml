@@ -1,0 +1,47 @@
+# AI-NOC Development Configuration
+
+# Database settings
+database:
+  url: "postgresql://noc_user:noc_password@postgres:5432/noc_config"
+  pool_size: 5
+  max_overflow: 10
+  echo: true  # Enable SQL logging in development
+
+# Redis settings
+redis:
+  url: "redis://redis:6379"
+  max_connections: 5
+
+# InfluxDB settings
+influxdb:
+  url: "http://influxdb:8086"
+  token: "admin-token-12345"
+  org: "ai-noc"
+  bucket: "network-metrics"
+
+# Kafka settings
+kafka:
+  bootstrap_servers: "kafka:9092"
+  auto_offset_reset: "earliest"
+
+# SNMP settings
+snmp:
+  default_community: "public"
+  timeout: 2
+  retries: 2
+
+# Logging settings
+logging:
+  level: "DEBUG"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+# AI/ML settings
+ai:
+  model_path: "/app/models"
+  training_data_path: "/app/data"
+  anomaly_threshold: 0.15  # More lenient in development
+
+# API settings
+api:
+  cors_origins: ["http://localhost:3000", "http://localhost:8000"]
+  reload: true  # Enable hot reload

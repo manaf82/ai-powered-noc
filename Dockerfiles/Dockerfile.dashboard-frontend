@@ -1,0 +1,52 @@
+FROM node:18-alpine AS build
+
+WORKDIR /app
+
+# Copy package files and install dependencies
+COPY src/dashboard/frontend/package*.json ./
+RUN npm install
+
+# Copy source and build
+COPY src/dashboard/frontend/ .
+RUN npm run build
+
+# Production stage
+FROM nginx:alpine
+
+# Install curl for health checks
+RUN apk add --no-cache curl
+
+# Copy built application
+COPY --from=build /app/build /usr/share/nginx/html
+
+# Create a simple nginx config
+RUN echo 'server { \
+    listen 80; \
+    server_name localhost; \
+    root /usr/share/nginx/html; \
+    index index.html; \
+    location / { \
+        try_files $uri $uri/ /index.html; \
+    } \
+    location /api/ { \
+        proxy_pass http://dashboard-backend:8000; \
+        proxy_set_header Host $host; \
+        proxy_set_header X-Real-IP $remote_addr; \
+    } \
+    location /health { \
+        return 200 "healthy"; \
+        add_header Content-Type text/plain; \
+    } \
+}' > /etc/nginx/conf.d/default.conf
+
+# Set permissions
+RUN chown -R nginx:nginx /usr/share/nginx/html
+RUN chown -R nginx:nginx /var/cache/nginx
+RUN chown -R nginx:nginx /var/log/nginx
+
+EXPOSE 80
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost/health || exit 1
+
+CMD ["nginx", "-g", "daemon off;"]

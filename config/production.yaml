@@ -1,0 +1,76 @@
+# AI-NOC Production Configuration
+
+# Database settings
+database:
+  url: "${DATABASE_URL}"
+  pool_size: 10
+  max_overflow: 20
+  pool_timeout: 30
+  pool_recycle: 3600
+
+# Redis settings
+redis:
+  url: "${REDIS_URL}"
+  max_connections: 10
+  retry_on_timeout: true
+  decode_responses: true
+
+# InfluxDB settings
+influxdb:
+  url: "${INFLUXDB_URL}"
+  token: "${INFLUXDB_TOKEN}"
+  org: "${INFLUXDB_ORG}"
+  bucket: "${INFLUXDB_BUCKET}"
+
+# Kafka settings
+kafka:
+  bootstrap_servers: "${KAFKA_BOOTSTRAP_SERVERS}"
+  auto_offset_reset: "earliest"
+  enable_auto_commit: true
+  group_id: "ai-noc-consumer"
+
+# SNMP settings
+snmp:
+  default_community: "${SNMP_COMMUNITY:public}"
+  timeout: 5
+  retries: 3
+  max_repetitions: 25
+
+# NetFlow settings
+netflow:
+  listen_port: "${NETFLOW_PORT:2055}"
+  buffer_size: 65536
+
+# Syslog settings
+syslog:
+  listen_port: "${SYSLOG_PORT:514}"
+  facility: 16
+
+# Logging settings
+logging:
+  level: "${LOG_LEVEL:INFO}"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "/app/logs/ai-noc.log"
+  max_size: "100MB"
+  backup_count: 5
+
+# AI/ML settings
+ai:
+  model_path: "/app/models"
+  training_data_path: "/app/data"
+  anomaly_threshold: 0.1
+  prediction_window: 3600  # seconds
+  retrain_interval: 86400  # seconds (24 hours)
+
+# API settings
+api:
+  cors_origins: ["*"]
+  max_request_size: 16777216  # 16MB
+  timeout: 300
+  workers: 4
+
+# Monitoring settings
+monitoring:
+  metrics_port: 9000
+  health_check_interval: 30
+  prometheus_enabled: true

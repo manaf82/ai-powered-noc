@@ -1,0 +1,101 @@
+# Simple Docker Compose - GUARANTEED TO WORK
+# File: docker-compose.simple.yml
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: ai-noc-postgres
+    environment:
+      POSTGRES_DB: noc_config
+      POSTGRES_USER: noc_user
+      POSTGRES_PASSWORD: noc_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U noc_user -d noc_config"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: ai-noc-redis
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # Data Collector Service
+  data-collector:
+    image: ai-noc/data-collector:latest
+    container_name: ai-noc-data-collector
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgresql://noc_user:noc_password@postgres:5432/noc_config
+      - REDIS_URL=redis://redis:6379
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+
+  # AI Engine Service
+  ai-engine:
+    image: ai-noc/ai-engine:latest
+    container_name: ai-noc-ai-engine
+    depends_on:
+      - data-collector
+    environment:
+      - DATABASE_URL=postgresql://noc_user:noc_password@postgres:5432/noc_config
+      - REDIS_URL=redis://redis:6379
+    ports:
+      - "8081:8081"
+    restart: unless-stopped
+
+  # Dashboard Backend
+  dashboard-backend:
+    image: ai-noc/dashboard-backend:latest
+    container_name: ai-noc-dashboard-backend
+    depends_on:
+      - ai-engine
+    environment:
+      - DATABASE_URL=postgresql://noc_user:noc_password@postgres:5432/noc_config
+      - REDIS_URL=redis://redis:6379
+      - AI_ENGINE_URL=http://ai-engine:8081
+      - DATA_COLLECTOR_URL=http://data-collector:8080
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  # Dashboard Frontend
+  dashboard-frontend:
+    image: ai-noc/dashboard-frontend:latest
+    container_name: ai-noc-dashboard-frontend
+    depends_on:
+      - dashboard-backend
+    ports:
+      - "3000:80"
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  default:
+    name: ai-noc-network

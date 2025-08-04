@@ -1,0 +1,41 @@
+# =====================================================
+# File: Dockerfiles/Dockerfile.mobile
+# Day 22-23: Containerization - Mobile App Build
+# =====================================================
+
+FROM node:18-alpine
+
+# Set working directory
+WORKDIR /app
+
+# Install React Native CLI and dependencies
+RUN npm install -g @react-native-community/cli
+RUN apk add --no-cache \
+    python3 \
+    make \
+    g++ \
+    openjdk11-jdk \
+    android-tools
+
+# Set JAVA_HOME
+ENV JAVA_HOME=/usr/lib/jvm/java-11-openjdk
+
+# Copy package files
+COPY src/mobile/package*.json ./
+
+# Install dependencies
+RUN npm install
+
+# Copy source code
+COPY src/mobile/ .
+
+# Expose Metro bundler port
+EXPOSE 8081
+
+# Health check for Metro bundler
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:8081/status || exit 1
+
+# Start Metro bundler
+CMD ["npx", "react-native", "start", "--host", "0.0.0.0"]
+

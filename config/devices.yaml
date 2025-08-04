@@ -1,0 +1,113 @@
+# AI-NOC Device Configuration
+# Defines all network devices to monitor
+
+devices:
+  - ip: "192.168.1.1"
+    name: "Core Router"
+    type: "router"
+    location: "Data Center"
+    snmp_community: "public"
+    snmp_version: "2c"
+    snmp_port: 161
+    collection_interval: 30
+    enabled: true
+    oids:
+      - name: "system_uptime"
+        oid: "1.3.6.1.2.1.1.3.0"
+        description: "System uptime in timeticks"
+      - name: "system_description"
+        oid: "1.3.6.1.2.1.1.1.0"
+        description: "System description"
+      - name: "interface_in_octets"
+        oid: "1.3.6.1.2.1.2.2.1.10"
+        description: "Interface input octets"
+      - name: "interface_out_octets"
+        oid: "1.3.6.1.2.1.2.2.1.16"
+        description: "Interface output octets"
+      - name: "cpu_usage"
+        oid: "1.3.6.1.4.1.9.9.109.1.1.1.1.7.1"
+        description: "CPU utilization percentage"
+      - name: "memory_used"
+        oid: "1.3.6.1.4.1.9.9.221.1.1.1.1.18.1.1"
+        description: "Memory used in bytes"
+
+  - ip: "192.168.1.10"
+    name: "Access Switch 1"
+    type: "switch"
+    location: "Floor 3"
+    snmp_community: "public"
+    snmp_version: "2c"
+    snmp_port: 161
+    collection_interval: 30
+    enabled: true
+    oids:
+      - name: "system_uptime"
+        oid: "1.3.6.1.2.1.1.3.0"
+      - name: "interface_in_octets"
+        oid: "1.3.6.1.2.1.2.2.1.10"
+      - name: "interface_out_octets"
+        oid: "1.3.6.1.2.1.2.2.1.16"
+
+  - ip: "192.168.1.2"
+    name: "Firewall"
+    type: "firewall"
+    location: "DMZ"
+    snmp_community: "public"
+    snmp_version: "2c"
+    snmp_port: 161
+    collection_interval: 30
+    enabled: true
+    oids:
+      - name: "system_uptime"
+        oid: "1.3.6.1.2.1.1.3.0"
+      - name: "cpu_usage"
+        oid: "1.3.6.1.4.1.9.9.109.1.1.1.1.7.1"
+      - name: "memory_used"
+        oid: "1.3.6.1.4.1.9.9.221.1.1.1.1.18.1.1"
+      - name: "connection_count"
+        oid: "1.3.6.1.4.1.9.9.147.1.2.2.2.1.5.40.6"
+        description: "Active connection count"
+
+  - ip: "192.168.1.100"
+    name: "Web Server"
+    type: "server"
+    location: "Data Center"
+    snmp_community: "public"
+    snmp_version: "2c"
+    snmp_port: 161
+    collection_interval: 60
+    enabled: true
+    oids:
+      - name: "system_uptime"
+        oid: "1.3.6.1.2.1.1.3.0"
+      - name: "cpu_usage"
+        oid: "1.3.6.1.4.1.2021.11.11.0"
+      - name: "memory_total"
+        oid: "1.3.6.1.4.1.2021.4.5.0"
+      - name: "memory_available"
+        oid: "1.3.6.1.4.1.2021.4.6.0"
+      - name: "disk_usage"
+        oid: "1.3.6.1.4.1.2021.9.1.9.1"
+        description: "Disk usage percentage"
+
+# Global SNMP settings
+global_settings:
+  timeout: 5
+  retries: 3
+  max_repetitions: 25
+  collection_threads: 10
+  
+# Alerting thresholds
+thresholds:
+  cpu_usage:
+    warning: 75
+    critical: 90
+  memory_usage:
+    warning: 80
+    critical: 95
+  disk_usage:
+    warning: 85
+    critical: 95
+  interface_utilization:
+    warning: 70
+    critical: 90
